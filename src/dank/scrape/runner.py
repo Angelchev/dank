@@ -143,6 +143,9 @@ async def _discover_source_batches(
                 domain=source.domain,
                 feed_urls=feed_urls,
                 batch_size=batch_size,
+                keep_feed_on_fetch_failure=(
+                    settings.keep_feed_on_fetch_failure
+                ),
             )
 
     async for batch in batches_iter:

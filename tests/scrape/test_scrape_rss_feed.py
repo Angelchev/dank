@@ -1,7 +1,18 @@
+import datetime
+import json
+import pathlib
+import xml.etree.ElementTree as ElementTree
 from typing import Any, cast
 
+import pytest
+
+from dank.config import load_settings
 from dank.scrape.rss import scrape_feed_batches
+from dank.scrape.runner import (
+    _discover_source_batches,  # pyright: ignore[reportPrivateUsage]
+)
 from dank.scrape.types import ScrapeBatch
+from dank.storage.clickhouse import QueryResult
 
 RSS_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -188,3 +199,127 @@ async def test_scrape_feed_batches_loads_multiple_feeds() -> None:
         "https://example.test/feed-one.xml",
         "https://example.test/feed-two.xml",
     ]
+
+
+@pytest.mark.parametrize("keep", [None, False, True])
+@pytest.mark.parametrize("failed_body", [None, ""])
+async def test_scrape_feed_batches_handles_article_fetch_failure(
+    *,
+    keep: bool | None,
+    failed_body: str | None,
+) -> None:
+    responses = {
+        "https://example.test/feed.xml": RSS_XML,
+        "https://example.test/post-one": PAGE_ONE_HTML,
+    }
+
+    if failed_body is not None:
+        responses["https://example.test/post-two"] = failed_body
+
+    client = _FakeClient(responses)
+    options = {} if keep is None else {"keep_feed_on_fetch_failure": keep}
+    batches = [
+        batch
+        async for batch in scrape_feed_batches(
+            cast(Any, client),
+            domain="example.test",
+            feed_urls=["https://example.test/feed.xml"],
+            **options,
+        )
+    ]
+
+    assert len(batches) == 1
+    batch = batches[0]
+    assert len(batch.posts) == (2 if keep else 1)
+    assert {asset.url for asset in batch.assets} == {
+        "https://example.test/img-one.jpg",
+    }
+    assert json.loads(batch.posts[0].payload)["page_html"] == PAGE_ONE_HTML
+    assert "page_fetch_status" not in json.loads(batch.posts[0].payload)
+
+    if keep:
+        retained = batch.posts[1]
+        payload = json.loads(retained.payload)
+        assert retained.url == "https://example.test/post-two"
+        assert retained.request_url == "https://example.test/feed.xml"
+        assert retained.source == "rss"
+        assert retained.post_created_at == datetime.datetime(
+            2026, 2, 1, 2, tzinfo=datetime.UTC,
+        )
+        assert payload["page_html"] == ""
+        assert payload["page_fetch_status"] == "failed"
+        assert ElementTree.fromstring(payload["feed_xml"]).findtext(
+            "title",
+        ) == "Second"
+
+
+@pytest.mark.parametrize("keep", [False, True])
+async def test_scrape_feed_batches_when_all_articles_fail(
+    *,
+    keep: bool,
+) -> None:
+    client = _FakeClient({"https://example.test/feed.xml": RSS_XML})
+    batches = [
+        batch
+        async for batch in scrape_feed_batches(
+            cast(Any, client),
+            domain="example.test",
+            feed_urls=["https://example.test/feed.xml"],
+            keep_feed_on_fetch_failure=keep,
+        )
+    ]
+
+    if keep:
+        assert len(batches) == 1
+        assert len(batches[0].posts) == 2
+        assert batches[0].assets == []
+    else:
+        assert batches == []
+
+
+class _FakeFeedCache:
+    async def fetch_json(
+        self,
+        query: str,
+        params: dict[str, Any],
+    ) -> QueryResult:
+        del query, params
+
+        return QueryResult(rows=[{
+            "feed_url": "https://example.test/feed.xml",
+            "feed_type": "rss2",
+        }])
+
+
+@pytest.mark.parametrize("keep", [False, True])
+async def test_runner_uses_configured_feed_failure_retention(
+    *,
+    tmp_path: pathlib.Path,
+    keep: bool,
+) -> None:
+    config_path = tmp_path / "test-settings.toml"
+    config_path.write_text(
+        'sources = ["example.test"]\n'
+        '[rss]\n'
+        f'keep_feed_on_fetch_failure = {str(keep).lower()}\n',
+    )
+    settings = load_settings(config_path)
+    client = _FakeClient({"https://example.test/feed.xml": RSS_XML})
+    batches = [
+        batch
+        async for batch in _discover_source_batches(
+            settings,
+            settings.sources[0],
+            cast(Any, _FakeFeedCache()),
+            cast(Any, client),
+            cast(Any, None),
+            feed_staleness=datetime.timedelta(days=14),
+            batch_size=50,
+        )
+    ]
+
+    if keep:
+        assert len(batches) == 1
+        assert len(batches[0].posts) == 2
+    else:
+        assert batches == []

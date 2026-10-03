@@ -57,6 +57,10 @@ scroll_pause_seconds = 1.5
 data_dir = "data"
 max_asset_bytes = 10485760
 
+[rss]
+# Keep feed entries when fetching their linked article fails.
+keep_feed_on_fetch_failure = false
+
 [browser]
 # Optional: full path or command name for a Chromium-based browser.
 executable_path = "thorium-browser"
@@ -84,6 +88,11 @@ accounts for account-based sources like `x.com`.
 
 If any particular domain lacks a specific configuration, the root of the
 domain will be scraped to discover RSS feeds to read from.
+
+`rss.keep_feed_on_fetch_failure` defaults to `false`. Set it to `true` to
+retain RSS/Atom entries when their linked article cannot be fetched or returns
+an empty body. Processing uses the available feed content, and the raw payload
+records `page_fetch_status = "failed"`. This does not schedule retries.
 
 `browser.executable_path` sets the browser binary to launch. If unset, DANK
 will try common Chromium locations.

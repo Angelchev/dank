@@ -241,3 +241,29 @@ def test_convert_raw_post_reads_page_html_payload() -> None:
     assert post is not None
     assert post.html == "<html><body>Full page</body></html>"
     assert post.title == "Atom Post"
+
+
+
+def test_convert_raw_post_preserves_feed_content_on_fetch_failure() -> None:
+    scraped_at = datetime.datetime(2026, 2, 1, 5, tzinfo=datetime.UTC)
+    raw = _raw_post(
+        payload=json.dumps({
+            "feed_xml": _raw_xml(RSS2_XML, "channel/item"),
+            "page_html": "",
+            "page_fetch_status": "failed",
+        }),
+        url="https://example.com/rss2-post",
+        scraped_at=scraped_at,
+    )
+
+    post = convert_raw_post(raw)
+
+    assert post is not None
+    assert post.post_id == raw.post_id
+    assert post.url == raw.url
+    assert post.title == "RSS2 Post"
+    assert post.html == "RSS2 Summary."
+    assert post.created_at == datetime.datetime(
+        2026, 2, 1, 1, tzinfo=datetime.UTC,
+    )
+    assert post.updated_at == scraped_at

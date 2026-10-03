@@ -61,6 +61,7 @@ class Settings(NamedTuple):
     browser: BrowserSettings
     email: EmailSettings | None
     logging: LoggingSettings
+    keep_feed_on_fetch_failure: bool = False
 
 
 def _as_dict(value: object) -> dict[str, Any] | None:
@@ -182,6 +183,13 @@ def load_settings(path: str | pathlib.Path = "config.toml") -> Settings:
         max_asset_bytes = None
 
     rss_data: dict[str, Any] = _as_dict(data.get("rss")) or {}
+    keep_feed_on_fetch_failure = rss_data.get(
+        "keep_feed_on_fetch_failure", False,
+    )
+
+    if not isinstance(keep_feed_on_fetch_failure, bool):
+        raise ConfigError("rss.keep_feed_on_fetch_failure must be a boolean")
+
     feed_staleness_days = int(rss_data.get("feed_staleness_days", 14))
 
     if feed_staleness_days <= 0:
@@ -237,4 +245,5 @@ def load_settings(path: str | pathlib.Path = "config.toml") -> Settings:
         browser=browser_settings,
         email=email_settings,
         logging=logging_settings,
+        keep_feed_on_fetch_failure=keep_feed_on_fetch_failure,
     )

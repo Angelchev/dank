@@ -439,6 +439,7 @@ async def scrape_feed_batches(
     feed_urls: list[str],
     batch_size: int = 50,
     concurrency: int = 4,
+    keep_feed_on_fetch_failure: bool = False,
 ) -> AsyncIterator[ScrapeBatch]:
     if not feed_urls:
         return
@@ -472,12 +473,12 @@ async def scrape_feed_batches(
         for feed_discovery in page_chunk:
             page_html = page_html_map.get(feed_discovery.page.url)
 
-            if not page_html:
+            if not page_html and not keep_feed_on_fetch_failure:
                 continue
 
             raw_post, assets = _build_raw_post(
                 feed_discovery.page,
-                page_html,
+                page_html or "",
                 request_url=feed_discovery.feed_url,
                 scraped_at=scraped_at,
             )
@@ -582,10 +583,13 @@ def dedupe_discoveries(
 
 
 def _compose_payload(feed_xml: str, page_html: str) -> str:
-    return json.dumps(
-        {"feed_xml": feed_xml, "page_html": page_html},
-        separators=(",", ":"),
-    )
+    payload = {"feed_xml": feed_xml, "page_html": page_html}
+
+    if not page_html:
+        # Preserve the article failure alongside the retained feed entry.
+        payload["page_fetch_status"] = "failed"
+
+    return json.dumps(payload, separators=(",", ":"))
 
 
 def _hash_post_id(url: str) -> str:
