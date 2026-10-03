@@ -28,7 +28,7 @@ dependencies = [
     "inotify-simple==1.3.5",
     "clickhouse-connect==0.8.15",
     "sentence-transformers==5.2.2",
-    "torch==2.10.0+cpu",
+    "torch==2.10.0",
     "jinja2==3.1.6",
 ]
 
@@ -119,7 +119,8 @@ markers = [
 ]
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+# macOS wheels come from PyPI; Linux and Windows use CPU-only builds.
+torch = { index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
